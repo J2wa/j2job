@@ -64,6 +64,8 @@ Legacy `RESUME_PROVIDER` and all `*_MODEL` / `*_FALLBACK_MODELS` environment set
 ## Complete resume targeting
 The final resume targets every distinct substantive job requirement, including preferred tools and domain skills. Analysis no longer stops at fourteen requirements. Drafting uses the job's exact terminology naturally and connects skills to concrete role/project bullets. Before the final review, unsupported bullets are removed and a requirement-gap check identifies missing examples. The reviewer uses those gaps to strengthen the resume's skills, headline, summary and relevant project experience. Remaining gaps are shown in the match-report warnings, outside exports. Mandatory eligibility facts such as degrees, licenses and years of experience are not invented. This targets complete content coverage; the evidence score still measures supplied background rather than assigning an automatic 100%.
 
+The **Job Match** tab includes **Regenerate resume to fill gaps**. It sends partial/missing qualifications and requirements without usable resume examples, along with the current edited resume, to the generation pipeline. It enables relevant project drafting and retains strong content while prioritizing skills and experience needed for those gaps. Original candidate sources remain separate from generated drafts. A displayed resume stays attached to its original listing if the form has since changed; a matching brief uses your latest edits. The old result remains available if generation fails or is cancelled, and successful output must be reviewed again before export.
+
 ## Generation and factual review
 Requirements are mapped to supplied evidence. The model drafts an application kit, then another model call reviews unsupported claims. Bullets whose source quotes cannot be found are removed.
 AI review can still make mistakes; users review claims before exports. Evidence coverage is a weighted drafting heuristic, not a universal ATS score or hiring probability. There is no guarantee of perfect fit or a top-hire outcome.
@@ -88,7 +90,7 @@ Live AI testing requires configured provider access and quota. A successful buil
 
 ## Verification performed
 - Next.js production build and TypeScript checks passed.
-- 43 unit tests passed, including ordered fallback, invalid output, rate limits, missing models, catalog outage, cancellation, attempt/stage deadlines, terminal account errors, evidence checks, and cookie access.
+- 46 unit tests passed, including ordered fallback, invalid output, rate limits, missing models, catalog outage, cancellation, attempt/stage deadlines, terminal account errors, evidence checks, and cookie access.
 - HTTP checks passed for page serving, password rejection/login, generation payload validation, cross-origin rejection, PDF worker, and coach access gates.
 - The authenticated coach session endpoint accepted a session with its compiled runtime running.
 - Browser automation was blocked by a missing system library in the test environment. Live model generation and visual/export behavior require verification on the configured deployment.
