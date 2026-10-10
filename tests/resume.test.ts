@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { evidenceExists, cleanBundle, coverage, profileSchema, plainResume } from "../lib/resume-schema.ts";
+import { evidenceExists, cleanBundle, coverage, profileSchema, plainResume, generationBundleSchema } from "../lib/resume-schema.ts";
 import { demoProfile, demoBundle, demoAnalysis } from "../lib/demo.ts";
 import { authorized, matches, token } from "../lib/access.ts";
 test("evidence matching rejects unsupported quotes",()=>{
@@ -32,4 +32,40 @@ test("AI access fails closed without configured password and valid cookie",()=>{
  assert.equal(matches("a","b"),false);
  assert.equal(authorized(new Request("https://example.com",{headers:{cookie:"resume_session="+token()}})),true);
  assert.equal(authorized(new Request("https://example.com",{headers:{cookie:"resume_session=wrong"}})),false);
+});
+
+test("only roles mapped to analyzed job requirements survive relevance filtering",()=>{
+ const input=structuredClone(demoBundle);
+ input.resume.experience[0].matchedRequirements=[demoAnalysis.requirements[0].requirement];
+ input.resume.experience.push({...structuredClone(input.resume.experience[0]),title:"Unrelated job",matchedRequirements:["Not a listing requirement"]});
+ const result=cleanBundle(input,demoProfile.experience,false,demoAnalysis);
+ assert.equal(result.resume.experience.length,1);
+ assert.ok(result.warnings.some(w=>w.includes("omitted")));
+});
+test("illustrative mode retains relevant project entries with standard headings but no invented company or dates",()=>{
+ const input=structuredClone(demoBundle);
+ input.resume.experience=[{title:"SQL Analyst",organization:"Invented Corporation",dates:"2010–2026",basis:"illustrative",matchedRequirements:["SQL"],bullets:[{text:"Built SQL queries for a quality dashboard.",evidence:""}]}];
+ const result=cleanBundle(input,demoProfile.experience,true,demoAnalysis);
+ assert.equal(result.resume.experience[0].organization,"Confidential Project");
+ assert.equal(result.resume.experience[0].dates,"");
+ const output=plainResume(result.resume,demoProfile);
+ assert.ok(output.includes("SQL Analyst | Confidential Project"));
+ assert.ok(!output.includes("illustrative")&&!output.includes("Invented Corporation"));
+ assert.ok(result.warnings.some(w=>w.includes("generated project details")));
+ assert.equal(cleanBundle(input,demoProfile.experience,false,demoAnalysis).resume.experience.length,0);
+});
+test("illustrative option never bypasses evidence checks for provided roles",()=>{
+ const input=structuredClone(demoBundle);
+ input.resume.experience[0].basis="provided";
+ input.resume.experience[0].matchedRequirements=["SQL"];
+ input.resume.experience[0].bullets=[{text:"Invented achievement",evidence:""}];
+ assert.equal(cleanBundle(input,demoProfile.experience,true,demoAnalysis).resume.experience.length,0);
+});
+
+test("generation requires provenance and relevance metadata while old saved drafts remain readable",()=>{
+ assert.equal(generationBundleSchema.safeParse(demoBundle).success,false);
+ const draft=structuredClone(demoBundle);
+ draft.resume.experience[0].basis="provided";
+ draft.resume.experience[0].matchedRequirements=["Evaluator calibration"];
+ assert.equal(generationBundleSchema.safeParse(draft).success,true);
 });

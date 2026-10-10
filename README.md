@@ -85,7 +85,9 @@ Use `RESUME_FALLBACK_MODELS` to restrict providers/models or set your own order.
 ## Generation and factual review
 Requirements are mapped to supplied evidence. The model drafts an application kit, then another model call reviews unsupported claims. Bullets whose source quotes cannot be found are removed.
 AI review can still make mistakes; users review claims before exports. Evidence coverage is a weighted drafting heuristic, not a universal ATS score or hiring probability. There is no guarantee of perfect fit or a top-hire outcome.
-Hypothetical examples are proposed practice projects, kept separate from application materials and excluded from resume exports.
+The resume includes only roles mapped to requirements in the analyzed listing; unrelated jobs are omitted. Relevant achievements are prioritized rather than copying the full work history.
+**Add relevant freelance/project experience** enables a fictional draft mode. It can add up to two relevant project roles with ordinary titles under `Freelance` or `Confidential Project`. No added/fictional labels appear inside the document; the app banner and warnings prompt review of generated project details. Internal `basis` metadata distinguishes provided and illustrative roles, while `matchedRequirements` maps each role to the listing. Fictional entries cannot invent real employer names, dates, credentials or numerical results. Replace invented work with completed experience before applying.
+With this option off, source evidence is still required for every experience bullet. Actual-candidate evidence coverage, cover letters and interview guidance do not count fictional roles as real qualifications. Separate practice-project examples remain outside resume exports.
 
 ## Privacy and access
 Documents and photos are processed in the browser. Entered and extracted resume text is sent through the selected AI provider (AI Gateway, OpenRouter or Gemini) during generation. The app does not intentionally store documents or generated kits in a server database.
