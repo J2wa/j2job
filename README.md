@@ -22,7 +22,7 @@ This standalone app lives at the root of the `J2wa/j2job` repository.
 4. Add `APP_ACCESS_PASSWORD`: a unique password of at least 12 characters.
 5. Configure Vercel AI Gateway access. Add `AI_GATEWAY_API_KEY` for explicit key authentication. Project OIDC may also authenticate Gateway calls when enabled and available.
 6. Deploy. Select **Unlock AI workspace** and enter your access password.
-7. Configure appropriate AI Gateway spend limits: a kit generation runs three model calls.
+7. Configure appropriate AI Gateway spend limits: a successful kit normally runs three model calls; fallback attempts can add calls and cost.
 Use a new project, not the existing j2viddd production project. The app does not need GitHub credentials at runtime.
 
 `withEve` compiles the coach routes and durable workflow integration. For CLI provisioning:
@@ -46,6 +46,15 @@ npm run build
 The postinstall script copies the PDF worker. Scanned PDF OCR is not included; paste the text instead.
 PDF export uses browser Print → Save as PDF. Word/text use ATS layout. Page count depends on content and print settings.
 
+## Resume model failover
+All resume calls use the same `AI_GATEWAY_API_KEY` (or Vercel OIDC); no extra provider keys are required.
+The app refreshes the public Gateway catalog hourly and filters for text input/output, structured output, at least 65,536 context tokens and 8,192 output tokens. Image-producing models are excluded. Each prompt is also checked against the model context size using a conservative UTF-8 byte bound.
+The preferred order is GPT-6 Luna Fast → Claude Haiku 5.5 → Gemini 3.8 Flash → Claude Sonnet 5.5 → DeepSeek V4.1 Flash → GPT-6.1 Sol, when present in the live catalog. Remaining compatible models follow in release-date order (newest first, then model ID). A bundled catalog snapshot is used if discovery is down.
+Each stage tries models sequentially until a schema-valid result succeeds or its time budget expires. Provider errors, unavailable models, rate limits, timeouts and invalid structured outputs move to the next candidate. Successful stages are retained, and the last successful model is preferred for the next stage. Models that failed are skipped for the rest of that request.
+Attempts have a 40-second limit; analysis, draft and review have 70/95/85-second limits, within the 260-second total generation deadline. A request may finish before exhausting the entire catalog. SDK retries are disabled to avoid repeatedly calling the same failing model; Gateway's provider routing still applies.
+Authentication, access-policy and exhausted-credit/budget errors stop immediately because another model cannot repair those account conditions. Progress reports backup attempts; final response metadata includes the model and attempt count for each stage. Logs contain only stage/model identifiers, never prompts or credentials.
+Use `RESUME_FALLBACK_MODELS` to restrict providers/models or set your own order. Catalog compatibility is metadata, not proof of output quality or access under your key. Review and evidence cleanup still apply after fallbacks. The separate eve coach continues to use `agent/agent.ts`.
+
 ## Generation and factual review
 Requirements are mapped to supplied evidence. The model drafts an application kit, then another model call reviews unsupported claims. Bullets whose source quotes cannot be found are removed.
 AI review can still make mistakes; users review claims before exports. Evidence coverage is a weighted drafting heuristic, not a universal ATS score or hiring probability. There is no guarantee of perfect fit or a top-hire outcome.
@@ -61,13 +70,14 @@ For public multi-user use, add individual authentication, scoped storage, distri
 ## Configuration
 - `APP_ACCESS_PASSWORD`: required for AI, at least 12 characters.
 - `AI_GATEWAY_API_KEY`: explicit Gateway credential; useful for local development.
-- `RESUME_MODEL`: optional form pipeline override; default `openai/gpt-6-luna-fast`.
+- `RESUME_MODEL`: optional first-choice resume model.
+- `RESUME_FALLBACK_MODELS`: optional comma-separated fallback IDs in order. Setting this replaces automatic catalog discovery as the candidate list (with `RESUME_MODEL` first if set). Blank uses all compatible catalog models.
 - Coach model is configured separately in `agent/agent.ts`.
 Live AI testing requires Gateway access and credits. A successful build does not prove generation quality.
 
 ## Verification performed
 - Next.js production build and TypeScript checks passed.
-- Five unit tests passed for evidence checks, fictional-content separation, coverage, validation, and cookie access.
+- Thirteen unit tests passed, including ordered fallback, invalid output, rate limits, missing models, catalog outage, cancellation, attempt/stage deadlines, terminal account errors, evidence checks, and cookie access.
 - HTTP checks passed for page serving, password rejection/login, generation payload validation, cross-origin rejection, PDF worker, and coach access gates.
 - The authenticated coach session endpoint accepted a session with its compiled runtime running.
 - Browser automation was blocked by a missing system library in the test environment. Live model generation and visual/export behavior require verification on the configured deployment.

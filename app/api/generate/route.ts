@@ -1,4 +1,7 @@
 import { generateText, Output } from "ai";
+import { z } from "zod";
+import { discoverModels, orderModels } from "@/lib/model-catalog";
+import { runWithFallback, generationMessage } from "@/lib/model-fallback";
 import { analysisSchema, bundleSchema, cleanBundle, evidenceExists, profileSchema, sources, coverage } from "@/lib/resume-schema";
 import { denied } from "@/lib/access";
 export const maxDuration=300;
@@ -20,23 +23,42 @@ export async function POST(request:Request) {
  const stream=new ReadableStream({
  async start(controller) {
   const send=(data:unknown)=>controller.enqueue(encoder.encode(JSON.stringify(data)+"\n"));
-  const model=process.env.RESUME_MODEL || "openai/gpt-6-luna-fast";
   const signal=AbortSignal.any([request.signal,AbortSignal.timeout(260000)]);
   try {
+   send({stage:"Finding available resume models"});
+   const catalog=await discoverModels();
+   const models=orderModels(catalog,process.env.RESUME_MODEL,process.env.RESUME_FALLBACK_MODELS);
+   const failed=new Set<string>();
+   let activeModel:string|undefined;
+   const modelRuns:{stage:string;model:string;attempts:number}[]=[];
+   async function generate<T>(schema:z.ZodType<T>,prompt:string,stage:string,budgetMs:number) {
+    // UTF-8 bytes conservatively bound input tokens across tokenizers; reserve output space.
+    const requiredContext=Buffer.byteLength(RULES+prompt,"utf8")+8192;
+    const context=new Map(catalog.map(m=>[m.id,m.context_window ?? 0]));
+    const candidates=[...new Set([...(activeModel?[activeModel]:[]),...models])]
+     .filter(m=>!failed.has(m) && (!context.has(m) || context.get(m)! >= requiredContext));
+    const result=await runWithFallback({models:candidates,signal,budgetMs,validate:value=>schema.parse(value),
+     onAttempt:(model,attempt)=>send({stage:attempt===1?stage:stage+" — switching to a backup model",model,attempt}),
+     onFailure:model=>{failed.add(model);console.warn("Resume model attempt failed",{stage,model});},
+     run:async(model,abortSignal)=>{
+      const result=await generateText({model,system:RULES,output:Output.object({schema}),prompt,abortSignal,maxRetries:0,maxOutputTokens:8192});
+      return result.output;
+     }});
+    activeModel=result.model;
+    modelRuns.push({stage,model:result.model,attempts:result.attempts});
+    return result.output;
+   }
    send({stage:"Reading the job and mapping your evidence"});
-   const {output:rawAnalysis}=await generateText({model,system:RULES,output:Output.object({schema:analysisSchema}),abortSignal:signal,
-    prompt:JSON.stringify({task:"Extract at most 14 essential job requirements. Assess candidate evidence, quote exact source text for supported/partial matches, list gaps and useful follow-up questions.",jobDescription:p.jobDescription,candidateSources:source})});
+   const rawAnalysis=await generate(analysisSchema,JSON.stringify({task:"Extract at most 14 essential job requirements. Assess candidate evidence, quote exact source text for supported/partial matches, list gaps and useful follow-up questions.",jobDescription:p.jobDescription,candidateSources:source}),"Reading the job and mapping your evidence",70000);
    const analysis={...rawAnalysis,requirements:rawAnalysis.requirements.map(r=>r.status!=="missing"&&!evidenceExists(r.evidence,source)?{...r,status:"missing" as const,evidence:"",recommendation:"Add concrete evidence for this requirement."}:r)};
    send({stage:"Writing your tailored resume and application kit"});
-   const {output:draft}=await generateText({model,system:RULES,output:Output.object({schema:bundleSchema}),abortSignal:signal,
-    prompt:JSON.stringify({task:"Create a tailored resume, cover letter, 5 interview questions with evidence-based answer guidance, warnings, and optional fictional portfolio project examples. For each bullet give an exact candidate source quote. Employer/title/dates must match supplied facts; omit absent organization/dates. Summary and skill list must be source-supported. Focused length targets around 500 words; Detailed around 850. Hypothetical examples describe proposed practice projects, not employment history.",profile:p,analysis})});
+   const draft=await generate(bundleSchema,JSON.stringify({task:"Create a tailored resume, cover letter, 5 interview questions with evidence-based answer guidance, warnings, and optional fictional portfolio project examples. For each bullet give an exact candidate source quote. Employer/title/dates must match supplied facts; omit absent organization/dates. Summary and skill list must be source-supported. Focused length targets around 500 words; Detailed around 850. Hypothetical examples describe proposed practice projects, not employment history.",profile:p,analysis}),"Writing your tailored resume and application kit",95000);
    send({stage:"Reviewing claims, relevance, and wording"});
-   const {output:reviewed}=await generateText({model,system:RULES,output:Output.object({schema:bundleSchema}),abortSignal:signal,
-    prompt:JSON.stringify({task:"Audit and return a corrected application kit. Remove ANY unsupported facts from every field (including summary, skills, employer names, dates, credentials, cover letter). Verify every bullet against its evidence. Remove overclaims and invented metrics. Use only source-supported candidate titles. Preserve clearly fictional examples only if requested. Include useful remaining warnings.",candidateSources:source,contact:{name:p.name,email:p.email,phone:p.phone,location:p.location,links:p.links},jobDescription:p.jobDescription,analysis,draft,hypothetical:p.hypothetical})});
-   send({done:true,bundle:cleanBundle(reviewed,source,p.hypothetical),analysis,coverage:coverage(analysis)});
+   const reviewed=await generate(bundleSchema,JSON.stringify({task:"Audit and return a corrected application kit. Remove ANY unsupported facts from every field (including summary, skills, employer names, dates, credentials, cover letter). Verify every bullet against its evidence. Remove overclaims and invented metrics. Use only source-supported candidate titles. Preserve clearly fictional examples only if requested. Include useful remaining warnings.",candidateSources:source,contact:{name:p.name,email:p.email,phone:p.phone,location:p.location,links:p.links},jobDescription:p.jobDescription,analysis,draft,hypothetical:p.hypothetical}),"Reviewing claims, relevance, and wording",85000);
+   send({done:true,bundle:cleanBundle(reviewed,source,p.hypothetical),analysis,coverage:coverage(analysis),modelRuns});
   } catch(error) {
    console.error("Resume pipeline failed",error instanceof Error?error.name:"Unknown");
-   send({error:"Generation could not complete. Check AI Gateway credentials, model availability, and credits; then retry."});
+   send({error:generationMessage(error)});
   } finally {controller.close();}
  }
  });

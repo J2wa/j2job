@@ -17,7 +17,7 @@
     "dev:eve": "eve dev",
     "start:eve": "eve start",
     "postinstall": "node scripts/setup.mjs",
-    "test": "node --experimental-strip-types --test tests/resume.test.ts"
+    "test": "node --experimental-strip-types --test tests/*.test.ts"
   },
   "dependencies": {
     "@tailwindcss/postcss": "4.3.0",
