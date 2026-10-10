@@ -1,6 +1,16 @@
 export class ResumeGenerationError extends Error {
   code: "access" | "credits" | "exhausted" | "timeout" | "configuration";
-  constructor(code: "access" | "credits" | "exhausted" | "timeout" | "configuration") { super(code); this.code = code; }
+  detail?: string;
+  constructor(code: "access" | "credits" | "exhausted" | "timeout" | "configuration", detail?: string) { super(code); this.code = code; this.detail = detail; }
+}
+export function failureReason(error:unknown):string {
+  const e=error as {statusCode?:number;name?:string}|null;
+  if(e?.statusCode===429) return "rate limits or quota exhausted";
+  if(e?.statusCode===404) return "model unavailable";
+  if(e?.statusCode===400 || e?.statusCode===422) return "model rejected the request or schema";
+  if(e?.name==="TimeoutError" || e?.name==="AbortError") return "model timed out";
+  if(e?.name==="SyntaxError" || e?.name==="ZodError" || e?.name?.includes("NoObjectGenerated")) return "invalid structured output";
+  return "provider failed or returned an incomplete response";
 }
 export function terminalFailure(error: unknown): "access" | "credits" | undefined {
   let current = error;
@@ -24,6 +34,7 @@ export async function runWithFallback<T>(options: {
   const now = options.now ?? Date.now;
   const deadline = now() + options.budgetMs;
   let attempt = 0;
+  const failures=new Set<string>();
   for (const model of [...new Set(options.models)]) {
     options.signal.throwIfAborted();
     const remaining = deadline - now();
@@ -49,17 +60,18 @@ export async function runWithFallback<T>(options: {
       options.signal.throwIfAborted();
       const terminal = terminalFailure(error);
       if (terminal) throw new ResumeGenerationError(terminal);
+      failures.add(failureReason(error));
       options.onFailure?.(model);
     }
   }
-  throw new ResumeGenerationError("exhausted");
+  throw new ResumeGenerationError("exhausted",[...failures].join("; "));
 }
 export function generationMessage(error: unknown, provider = "AI Gateway") {
   if (error instanceof ResumeGenerationError) {
     if (error.code === "configuration") return "The AI provider or model configuration is invalid. Ask the workspace owner to check the environment settings.";
     if (error.code === "access") return provider + " access was rejected. Check the configured API key and model access rules.";
     if (error.code === "credits") return provider + " credits or budget are exhausted. Add credits or adjust the budget, then retry.";
-    if (error.code === "exhausted") return "The compatible models could not return a valid resume. Please retry or configure a different model order.";
+    if (error.code === "exhausted") return "The compatible models could not return a valid resume."+(error.detail?" Reported issues: "+error.detail+".":"")+" Check the provider key, model settings and quota, then retry.";
   }
   return "Generation reached its time limit or was interrupted. Please retry; shortening very long input may help.";
 }

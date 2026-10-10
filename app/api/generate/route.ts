@@ -3,6 +3,7 @@ import { z } from "zod";
 import { discoverModels, orderModels } from "@/lib/model-catalog";
 import { runWithFallback, generationMessage } from "@/lib/model-fallback";
 import { selectProvider, discoverOpenRouterModels, orderOpenRouterModels, generateOpenRouter } from "@/lib/openrouter";
+import { geminiModels } from "@/lib/gemini";
 import { analysisSchema, bundleSchema, cleanBundle, evidenceExists, profileSchema, sources, coverage } from "@/lib/resume-schema";
 import { denied } from "@/lib/access";
 export const maxDuration=300;
@@ -28,10 +29,10 @@ export async function POST(request:Request) {
   let providerLabel="AI provider";
   try {
    const provider=selectProvider(p.aiProvider);
-   providerLabel=provider==="openrouter"?"OpenRouter":"AI Gateway";
+   providerLabel=provider==="openrouter"?"OpenRouter":provider==="gemini"?"Gemini":"AI Gateway";
    send({stage:"Finding available resume models"});
-   const catalog=await (provider==="openrouter"?discoverOpenRouterModels():discoverModels());
-   const models=provider==="openrouter"
+   const catalog=provider==="gemini"?[]:await (provider==="openrouter"?discoverOpenRouterModels():discoverModels());
+   const models=provider==="gemini"?geminiModels(process.env.GEMINI_MODEL,process.env.GEMINI_FALLBACK_MODELS):provider==="openrouter"
     ?orderOpenRouterModels(catalog,process.env.OPENROUTER_MODEL,process.env.OPENROUTER_FALLBACK_MODELS)
     :orderModels(catalog,process.env.RESUME_MODEL,process.env.RESUME_FALLBACK_MODELS);
    const failed=new Set<string>();
@@ -47,7 +48,7 @@ export async function POST(request:Request) {
      onAttempt:(model,attempt)=>send({stage:attempt===1?stage:stage+" — switching to a backup model",model,attempt}),
      onFailure:model=>{failed.add(model);console.warn("Resume model attempt failed",{stage,model});},
      run:async(model,abortSignal)=>{
-      if(provider==="openrouter") return generateOpenRouter({model,system:RULES,prompt,schema,signal:abortSignal});
+      if(provider!=="gateway") return generateOpenRouter({model,system:RULES,prompt,schema,signal:abortSignal,provider});
       const result=await generateText({model,system:RULES,output:Output.object({schema}),prompt,abortSignal,maxRetries:0,maxOutputTokens:8192});
       return result.output;
      }});

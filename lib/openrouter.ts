@@ -2,13 +2,18 @@ import { z } from "zod";
 import { configuredModels, type CatalogModel } from "./model-catalog.ts";
 import { ResumeGenerationError } from "./model-fallback.ts";
 
-export type ResumeProvider = "gateway" | "openrouter";
+export type ResumeProvider = "gateway" | "openrouter" | "gemini";
 export function selectProvider(choice: string | undefined, env: Record<string,string|undefined> = process.env): ResumeProvider {
   const selected = choice && choice !== "auto" ? choice : env.RESUME_PROVIDER ?? "auto";
-  if (!["auto","gateway","openrouter"].includes(selected)) throw new ResumeGenerationError("configuration");
+  if (!["auto","gateway","openrouter","gemini"].includes(selected)) throw new ResumeGenerationError("configuration");
+  if (selected === "gemini") return "gemini";
   if (selected === "openrouter") return "openrouter";
   if (selected === "gateway") return "gateway";
-  return env.OPENROUTER_API_KEY && !env.AI_GATEWAY_API_KEY && !env.VERCEL_OIDC_TOKEN ? "openrouter" : "gateway";
+  if (!env.AI_GATEWAY_API_KEY && !env.VERCEL_OIDC_TOKEN) {
+    if (env.OPENROUTER_API_KEY) return "openrouter";
+    if (env.GEMINI_API_KEY || env.GOOGLE_GENERATIVE_AI_API_KEY) return "gemini";
+  }
+  return "gateway";
 }
 const preferred = ["openai/gpt-6-luna","anthropic/claude-haiku-5.5","google/gemini-3.8-flash","anthropic/claude-sonnet-5.5","deepseek/deepseek-v4.1-flash","openai/gpt-6.1-sol"];
 // Metadata fetched from the OpenRouter catalog on 2026-10-11.
@@ -52,22 +57,32 @@ export function orderOpenRouterModels(catalog: CatalogModel[], primary?: string,
 }
 class OpenRouterError extends Error {
   statusCode: number;
-  constructor(statusCode:number) {super("OpenRouter request failed");this.name="OpenRouterError";this.statusCode=statusCode;}
+  constructor(statusCode:number,provider="OpenRouter") {super(provider+" request failed");this.name="ModelProviderError";this.statusCode=statusCode;}
 }
 export async function generateOpenRouter<T>(options: {
   model: string; system: string; prompt: string; schema: z.ZodType<T>;
   signal: AbortSignal; apiKey?: string; fetcher?: typeof fetch;
+  provider?: "openrouter" | "gemini";
 }): Promise<unknown> {
-  const apiKey=options.apiKey ?? process.env.OPENROUTER_API_KEY;
-  if (!apiKey?.trim()) throw new OpenRouterError(401);
-  const response=await (options.fetcher ?? fetch)("https://openrouter.ai/api/v1/chat/completions",{
+  const gemini=options.provider==="gemini";
+  const label=gemini?"Gemini":"OpenRouter";
+  const apiKey=options.apiKey ?? (gemini?(process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY):process.env.OPENROUTER_API_KEY);
+  if (!apiKey?.trim()) throw new OpenRouterError(401,label);
+  const response=await (options.fetcher ?? fetch)(gemini?"https://generativelanguage.googleapis.com/v1beta/openai/chat/completions":"https://openrouter.ai/api/v1/chat/completions",{
     method:"POST",signal:options.signal,headers:{"Authorization":"Bearer "+apiKey,"Content-Type":"application/json"},
     body:JSON.stringify({model:options.model,stream:false,max_tokens:8192,
       messages:[{role:"system",content:options.system},{role:"user",content:options.prompt}],
-      provider:{require_parameters:true},
+      ...(gemini?{reasoning_effort:"low"}:{provider:{require_parameters:true}}),
       response_format:{type:"json_schema",json_schema:{name:"resume_output",strict:true,schema:z.toJSONSchema(options.schema)}}}),
   });
-  if (!response.ok) throw new OpenRouterError(response.status);
+  if (!response.ok) {
+    // Gemini reports invalid API keys as HTTP 400, rather than always 401.
+    if (gemini && response.status===400) {
+      const error=await response.json().catch(()=>null);
+      if (Array.isArray(error?.error?.details) && error.error.details.some((d:{reason?:string})=>d.reason==="API_KEY_INVALID")) throw new OpenRouterError(401,label);
+    }
+    throw new OpenRouterError(response.status,label);
+  }
   const body=await response.json();
   if (body?.error) throw new OpenRouterError(typeof body.error.code==="number"?body.error.code:502);
   const choice=body?.choices?.[0];
