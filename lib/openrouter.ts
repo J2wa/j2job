@@ -1,17 +1,20 @@
 import { z } from "zod";
 import { configuredModels, type CatalogModel } from "./model-catalog.ts";
 import { ResumeGenerationError } from "./model-fallback.ts";
+import { providerEnabled } from "./api-keys.ts";
 
-export type ResumeProvider = "gateway" | "openrouter" | "gemini";
+export type ResumeProvider = "gateway" | "openrouter" | "gemini" | "openai";
 export function selectProvider(choice: string | undefined, env: Record<string,string|undefined> = process.env): ResumeProvider {
   const selected = choice && choice !== "auto" ? choice : env.RESUME_PROVIDER ?? "auto";
-  if (!["auto","gateway","openrouter","gemini"].includes(selected)) throw new ResumeGenerationError("configuration");
+  if (!["auto","gateway","openrouter","gemini","openai"].includes(selected)) throw new ResumeGenerationError("configuration");
+  if (selected === "openai") return "openai";
   if (selected === "gemini") return "gemini";
   if (selected === "openrouter") return "openrouter";
   if (selected === "gateway") return "gateway";
-  if (!env.AI_GATEWAY_API_KEY && !env.VERCEL_OIDC_TOKEN) {
-    if (env.OPENROUTER_API_KEY) return "openrouter";
-    if (env.GEMINI_API_KEY || env.GOOGLE_GENERATIVE_AI_API_KEY) return "gemini";
+  if (!providerEnabled("gateway",env)) {
+    if (providerEnabled("openrouter",env)) return "openrouter";
+    if (providerEnabled("gemini",env)) return "gemini";
+    if (providerEnabled("openai",env)) return "openai";
   }
   return "gateway";
 }
@@ -62,17 +65,18 @@ class OpenRouterError extends Error {
 export async function generateOpenRouter<T>(options: {
   model: string; system: string; prompt: string; schema: z.ZodType<T>;
   signal: AbortSignal; apiKey?: string; fetcher?: typeof fetch;
-  provider?: "openrouter" | "gemini";
+  provider?: "openrouter" | "gemini" | "openai";
 }): Promise<unknown> {
   const gemini=options.provider==="gemini";
-  const label=gemini?"Gemini":"OpenRouter";
-  const apiKey=options.apiKey ?? (gemini?(process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY):process.env.OPENROUTER_API_KEY);
+  const openai=options.provider==="openai";
+  const label=gemini?"Gemini":openai?"OpenAI":"OpenRouter";
+  const apiKey=options.apiKey ?? (gemini?(process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY):openai?process.env.OPENAI_API_KEY:process.env.OPENROUTER_API_KEY);
   if (!apiKey?.trim()) throw new OpenRouterError(401,label);
-  const response=await (options.fetcher ?? fetch)(gemini?"https://generativelanguage.googleapis.com/v1beta/openai/chat/completions":"https://openrouter.ai/api/v1/chat/completions",{
+  const response=await (options.fetcher ?? fetch)(gemini?"https://generativelanguage.googleapis.com/v1beta/openai/chat/completions":openai?"https://api.openai.com/v1/chat/completions":"https://openrouter.ai/api/v1/chat/completions",{
     method:"POST",signal:options.signal,headers:{"Authorization":"Bearer "+apiKey,"Content-Type":"application/json"},
-    body:JSON.stringify({model:options.model,stream:false,max_tokens:8192,
+    body:JSON.stringify({model:options.model,stream:false,...(openai?{max_completion_tokens:8192}:{max_tokens:8192}),
       messages:[{role:"system",content:options.system},{role:"user",content:options.prompt}],
-      ...(gemini?{reasoning_effort:"low"}:{provider:{require_parameters:true}}),
+      ...(gemini?{reasoning_effort:"low"}:openai?{}:{provider:{require_parameters:true}}),
       response_format:{type:"json_schema",json_schema:{name:"resume_output",strict:true,schema:z.toJSONSchema(options.schema)}}}),
   });
   if (!response.ok) {

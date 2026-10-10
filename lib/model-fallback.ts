@@ -28,7 +28,9 @@ export async function runWithFallback<T>(options: {
   run: (model: string, signal: AbortSignal) => Promise<unknown>;
   validate: (value: unknown) => T;
   onAttempt?: (model: string, attempt: number) => void;
-  onFailure?: (model: string) => void;
+  onFailure?: (model: string,error?:unknown) => void;
+  shouldSkip?: (model:string)=>boolean;
+  onTerminalFailure?: (model:string,code:"access"|"credits")=>boolean;
   now?: () => number; attemptMs?: number;
 }) {
   const now = options.now ?? Date.now;
@@ -36,6 +38,7 @@ export async function runWithFallback<T>(options: {
   let attempt = 0;
   const failures=new Set<string>();
   for (const model of [...new Set(options.models)]) {
+    if(options.shouldSkip?.(model))continue;
     options.signal.throwIfAborted();
     const remaining = deadline - now();
     if (remaining <= 0) throw new ResumeGenerationError("timeout");
@@ -59,9 +62,9 @@ export async function runWithFallback<T>(options: {
     } catch (error) {
       options.signal.throwIfAborted();
       const terminal = terminalFailure(error);
-      if (terminal) throw new ResumeGenerationError(terminal);
+      if (terminal && !options.onTerminalFailure?.(model,terminal)) throw new ResumeGenerationError(terminal);
       failures.add(failureReason(error));
-      options.onFailure?.(model);
+      options.onFailure?.(model,error);
     }
   }
   throw new ResumeGenerationError("exhausted",[...failures].join("; "));

@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { ArrowUpRight, FileText, Sparkles, Upload, Check, Download, ShieldCheck, BriefcaseBusiness, Plus, X, ChevronRight, LoaderCircle, Eye, WandSparkles, LockKeyhole } from "lucide-react";
 import { profileSchema, resumeSchema, bundleSchema, analysisSchema, plainResume, type Profile, type Bundle, type Analysis } from "@/lib/resume-schema";
 import { demoProfile, demoBundle, demoAnalysis } from "@/lib/demo";
@@ -12,6 +12,16 @@ export default function Studio(){
  const [resultProfile,setResultProfile]=useState<Profile>(empty),[style,setStyle]=useState<Style>("ats"),[tab,setTab]=useState("resume"),[step,setStep]=useState(0),[photo,setPhoto]=useState(""),[resultPhoto,setResultPhoto]=useState("");
  const [busy,setBusy]=useState(false),[stage,setStage]=useState(""),[error,setError]=useState(""),[demo,setDemo]=useState(false),[reviewed,setReviewed]=useState(false),[editing,setEditing]=useState(false),[json,setJson]=useState(""),[password,setPassword]=useState(""),[unlocked,setUnlocked]=useState(false),[accessOpen,setAccessOpen]=useState(false),[notice,setNotice]=useState("");
  const upload=useRef<HTMLInputElement>(null),avatar=useRef<HTMLInputElement>(null),abort=useRef<AbortController|null>(null);
+ const [modelOptions,setModelOptions]=useState<{id:string;name:string;enabled:boolean;source:string;models:{id:string}[]}[]>([]);
+ const [defaultProvider,setDefaultProvider]=useState("gateway"),[modelStatus,setModelStatus]=useState("Unlock the workspace to load model options."),[loadingModels,setLoadingModels]=useState(false);
+ async function refreshModels(signal?:AbortSignal){
+  setLoadingModels(true);try{const response=await fetch("/api/models",{signal});const data=await response.json();if(!response.ok)throw new Error(data.error);
+   setModelOptions(data.providers);setDefaultProvider(data.defaultProvider);setModelStatus("Choose a model, or let automatic fallback find one.");
+  }catch(error){if(!signal?.aborted)setModelStatus(error instanceof Error?error.message:"Model options unavailable.");}finally{if(!signal?.aborted)setLoadingModels(false);}
+ }
+ useEffect(()=>{if(step!==2&&!unlocked)return;const controller=new AbortController();void refreshModels(controller.signal);return()=>controller.abort();},[step,unlocked]);
+ const effectiveProvider=p.aiProvider&&p.aiProvider!=="auto"?p.aiProvider:defaultProvider;
+ const currentModels=modelOptions.find(option=>option.id===effectiveProvider);
  function field(key:keyof Profile,value:string|boolean){setP(v=>({...v,[key]:value}));}
  function message(e:unknown){setError(e instanceof Error?e.message:"Something went wrong.");}
  async function importResume(file?:File){
@@ -78,7 +88,11 @@ export default function Studio(){
  <div className="photo-row">{photo?<img src={photo} alt="Profile preview"/>:<div className="avatar-placeholder">+</div>}<div><strong>Profile photo <span className="optional">optional</span></strong><p>Available in Modern. ATS exports use text only.</p></div><button className="quiet" onClick={()=>avatar.current?.click()}>Add photo</button>{photo&&<button aria-label="Remove photo" className="quiet" onClick={()=>setPhoto("")}><X size={16}/></button>}</div><input ref={avatar} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={e=>{void importPhoto(e.target.files?.[0]);e.target.value="";}}/></>}
  {step===2&&<><div className="form-kicker">MAKE IT FEEL LIKE YOU</div><label className="field"><span>Writing tone</span><select value={p.tone} onChange={e=>field("tone",e.target.value)}>{["Professional","Confident","Concise"].map(x=><option key={x}>{x}</option>)}</select></label>
  <label className="field"><span>Detail level</span><select value={p.length} onChange={e=>field("length",e.target.value)}><option>Focused</option><option>Detailed</option></select></label>
- <label className="field"><span>AI provider</span><select value={p.aiProvider??"auto"} onChange={e=>field("aiProvider",e.target.value)}><option value="auto">Automatic — workspace default</option><option value="gateway">Vercel AI Gateway</option><option value="openrouter">OpenRouter</option><option value="gemini">Google Gemini API</option></select></label>
+ <label className="field"><span>AI provider</span><select disabled={busy} value={p.aiProvider??"auto"} onChange={e=>{setP(value=>({...value,aiProvider:e.target.value as Profile["aiProvider"],aiModel:""}));}}><option value="auto">Automatic — workspace default</option><option value="gateway">Vercel AI Gateway</option><option value="openrouter">OpenRouter</option><option value="gemini">Google Gemini API</option><option value="openai">OpenAI — multiple keys</option></select></label>
+ <label className="field"><span>Model {currentModels?"("+currentModels.models.length+" compatible options)":""}</span><select disabled={busy||loadingModels||!currentModels?.enabled} value={p.aiModel??""} onChange={e=>field("aiModel",e.target.value)}><option value="">Automatic model fallback</option>{p.aiModel&&!currentModels?.models.some(m=>m.id===p.aiModel)&&<option value={p.aiModel}>{p.aiModel} — saved selection</option>}{currentModels?.models.map(model=><option key={model.id} value={model.id}>{model.id}</option>)}</select></label>
+ <p className="privacy" role="status">{modelStatus}{currentModels?.source==="cached fallback"?" Showing fallback catalog; live discovery is unavailable.":""}{currentModels&&!currentModels.enabled?" This provider has no configured key.":""}</p>
+ <button type="button" className="quiet" disabled={loadingModels||busy} onClick={()=>void refreshModels()}>{loadingModels?"Loading models…":"Refresh model options"}</button>
+ <label className="checkbox-row"><input type="checkbox" disabled={busy} checked={p.providerFallback??true} onChange={e=>field("providerFallback",e.target.checked)}/><span><strong>Try other configured AI providers if needed</strong><small>Start with your selection, then use available backup models and keys. Your resume text may be sent to another configured provider.</small></span></label>
  <div className="style-options">{styles.map(s=><button key={s.id} className={style===s.id?"chosen":""} onClick={()=>setStyle(s.id)}><div className={"mini-page "+s.id}><i/><i/><i/><i/></div><strong>{s.name}</strong><small>{s.detail}</small>{style===s.id&&<Check size={15}/>}</button>)}</div>
  <label className="checkbox-row"><input type="checkbox" checked={p.hypothetical} onChange={e=>field("hypothetical",e.target.checked)}/><span><strong>Include hypothetical practice projects</strong><small>Clearly labeled examples in a separate section. They stay out of application resumes.</small></span></label><div className="tip"><ShieldCheck size={18}/><span>Your match report highlights supported qualifications and gaps. It does not predict hiring decisions.</span></div></>}
  <div className="form-actions">{step<2?<button className="secondary" onClick={()=>setStep(step+1)}>Continue <ChevronRight size={16}/></button>:null}<button className="primary" disabled={busy} onClick={()=>void generate()}>{busy?<LoaderCircle className="spin" size={17}/>:<Sparkles size={17}/>} {busy?"Creating your kit…":"Create application kit"}</button></div>

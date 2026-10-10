@@ -1,9 +1,9 @@
-import { generateText, Output } from "ai";
+import { generateText, Output, createGateway } from "ai";
 import { z } from "zod";
-import { discoverModels, orderModels } from "@/lib/model-catalog";
 import { runWithFallback, generationMessage } from "@/lib/model-fallback";
-import { selectProvider, discoverOpenRouterModels, orderOpenRouterModels, generateOpenRouter } from "@/lib/openrouter";
-import { geminiModels } from "@/lib/gemini";
+import { generateOpenRouter } from "@/lib/openrouter";
+import {catalogFor,modelOrder,selectedModelOrder,providerOrder,providerNames} from "@/lib/provider-models";
+import {createKeyRunner,providerKeys,type Provider} from "@/lib/api-keys";
 import { analysisSchema, bundleSchema, cleanBundle, evidenceExists, profileSchema, sources, coverage } from "@/lib/resume-schema";
 import { denied } from "@/lib/access";
 export const maxDuration=300;
@@ -28,32 +28,44 @@ export async function POST(request:Request) {
   const signal=AbortSignal.any([request.signal,AbortSignal.timeout(260000)]);
   let providerLabel="AI provider";
   try {
-   const provider=selectProvider(p.aiProvider);
-   providerLabel=provider==="openrouter"?"OpenRouter":provider==="gemini"?"Gemini":"AI Gateway";
+   const providerList=providerOrder(p.aiProvider,p.providerFallback??true);
+   const provider=providerList[0];
+   providerLabel=providerList.length>1?"AI providers":providerNames[provider];
    send({stage:"Finding available resume models"});
-   const catalog=provider==="gemini"?[]:await (provider==="openrouter"?discoverOpenRouterModels():discoverModels());
-   const models=provider==="gemini"?geminiModels(process.env.GEMINI_MODEL,process.env.GEMINI_FALLBACK_MODELS):provider==="openrouter"
-    ?orderOpenRouterModels(catalog,process.env.OPENROUTER_MODEL,process.env.OPENROUTER_FALLBACK_MODELS)
-    :orderModels(catalog,process.env.RESUME_MODEL,process.env.RESUME_FALLBACK_MODELS);
+   const catalogs=await Promise.all(providerList.map(async id=>({id,...await catalogFor(id)})));
+   const lists=catalogs.map(c=>({provider:c.id,models:selectedModelOrder(c.id===provider?p.aiModel:undefined,modelOrder(c.id,c.models),c.models)}));
+   // Interleave providers so a slow primary cannot consume every attempt before backups run.
+   const models:string[]=[];
+   for(let index=0;index<Math.max(...lists.map(l=>l.models.length));index++)for(const list of lists)if(list.models[index])models.push(list.provider+"|"+list.models[index]);
+   const context=new Map(catalogs.flatMap(c=>c.models.map(m=>[c.id+"|"+m.id,m.context_window??0] as const)));
+   const split=(id:string)=>{const [provider,model]=id.split("|");return {provider:provider as Provider,model};};
+   const pools=new Map(providerList.map(id=>[id,createKeyRunner(providerKeys(id))]));
+   const disabledProviders=new Set<Provider>();
    const failed=new Set<string>();
    let activeModel:string|undefined;
-   const modelRuns:{stage:string;model:string;attempts:number}[]=[];
+   const modelRuns:{stage:string;provider:Provider;model:string;attempts:number}[]=[];
    async function generate<T>(schema:z.ZodType<T>,prompt:string,stage:string,budgetMs:number) {
     // UTF-8 bytes conservatively bound input tokens across tokenizers; reserve output space.
     const requiredContext=Buffer.byteLength(RULES+prompt,"utf8")+8192;
-    const context=new Map(catalog.map(m=>[m.id,m.context_window ?? 0]));
     const candidates=[...new Set([...(activeModel?[activeModel]:[]),...models])]
-     .filter(m=>!failed.has(m) && (!context.has(m) || context.get(m)! >= requiredContext));
+     .filter(m=>!failed.has(m) && (!context.get(m) || context.get(m)! >= requiredContext));
     const result=await runWithFallback({models:candidates,signal,budgetMs,validate:value=>schema.parse(value),
-     onAttempt:(model,attempt)=>send({stage:attempt===1?stage:stage+" — switching to a backup model",model,attempt}),
-     onFailure:model=>{failed.add(model);console.warn("Resume model attempt failed",{stage,model});},
-     run:async(model,abortSignal)=>{
-      if(provider!=="gateway") return generateOpenRouter({model,system:RULES,prompt,schema,signal:abortSignal,provider});
-      const result=await generateText({model,system:RULES,output:Output.object({schema}),prompt,abortSignal,maxRetries:0,maxOutputTokens:8192});
-      return result.output;
+     shouldSkip:id=>disabledProviders.has(split(id).provider),
+     onTerminalFailure:(id)=>{disabledProviders.add(split(id).provider);return candidates.some(m=>!disabledProviders.has(split(m).provider)&&!failed.has(m));},
+     onAttempt:(id,attempt)=>{const target=split(id);send({stage:(attempt===1?stage:stage+" — trying a backup")+" ("+providerNames[target.provider]+", "+target.model+")",...target,attempt});},
+     onFailure:(model,error)=>{failed.add(model);if((error as {poolExhausted?:boolean})?.poolExhausted)disabledProviders.add(split(model).provider);console.warn("Resume model attempt failed",{stage,model});},
+     run:async(id,abortSignal)=>{
+      const target=split(id);
+      const run=async(key?:string,keySignal=abortSignal)=>{
+       if(target.provider!=="gateway") return generateOpenRouter({model:target.model,system:RULES,prompt,schema,signal:keySignal,provider:target.provider,apiKey:key});
+       const result=await generateText({model:key?createGateway({apiKey:key})(target.model):target.model,system:RULES,output:Output.object({schema}),prompt,abortSignal:keySignal,maxRetries:0,maxOutputTokens:8192});
+       return result.output;
+      };
+      if(target.provider==="gateway"&&!providerKeys("gateway").length)return run();
+      return pools.get(target.provider)!((key,keySignal)=>run(key,keySignal),abortSignal);
      }});
     activeModel=result.model;
-    modelRuns.push({stage,model:result.model,attempts:result.attempts});
+    modelRuns.push({stage,...split(result.model),attempts:result.attempts});
     return result.output;
    }
    send({stage:"Reading the job and mapping your evidence"});
