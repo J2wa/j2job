@@ -70,6 +70,17 @@ export function cleanBundle(bundle:Bundle, source:string, hypothetical:boolean, 
    ...(removed.length?[removed.length+" bullet(s) removed because their quoted evidence could not be found or illustrative mode is off."]:[]),
    ...(hasIllustrative?["Review generated project details and use only work you have actually completed in an application."]:[])]};
 }
+export function resumeRequirementGaps(resume:Resume,analysis:Analysis):string[] {
+ const normalize=(value:string)=>value.trim().toLowerCase().replace(/\s+/g," ");
+ const covered=new Set(resume.experience.filter(role=>role.bullets.some(bullet=>bullet.text.trim().length>0))
+  .flatMap(role=>role.matchedRequirements??[]).map(normalize));
+ const seen=new Set<string>();
+ return analysis.requirements.flatMap(item=>{
+  const key=normalize(item.requirement);
+  if(!key||seen.has(key)||covered.has(key))return [];
+  seen.add(key);return [item.requirement];
+ });
+}
 export function coverage(a:Analysis) {
  return a.requirements.length?Math.round(100*a.requirements.reduce((n,r)=>n+(r.status==="supported"?1:r.status==="partial"?.5:0),0)/a.requirements.length):0;
 }

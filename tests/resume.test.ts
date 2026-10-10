@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { evidenceExists, cleanBundle, coverage, profileSchema, plainResume, generationBundleSchema } from "../lib/resume-schema.ts";
+import { evidenceExists, cleanBundle, coverage, profileSchema, plainResume, generationBundleSchema, resumeRequirementGaps } from "../lib/resume-schema.ts";
 import { demoProfile, demoBundle, demoAnalysis } from "../lib/demo.ts";
 import { authorized, matches, token } from "../lib/access.ts";
 test("evidence matching rejects unsupported quotes",()=>{
@@ -68,4 +68,22 @@ test("generation requires provenance and relevance metadata while old saved draf
  draft.resume.experience[0].basis="provided";
  draft.resume.experience[0].matchedRequirements=["Evaluator calibration"];
  assert.equal(generationBundleSchema.safeParse(draft).success,true);
+});
+
+test("resume gap review catches requirements missing from usable experience",()=>{
+ const draft=structuredClone(demoBundle);
+ draft.resume.experience[0].matchedRequirements=["Evaluator calibration","Python automation and reporting","Multilingual team coordination"];
+ assert.deepEqual(resumeRequirementGaps(draft.resume,demoAnalysis),["SQL"]);
+ draft.resume.experience.push({title:"SQL Project",organization:"Freelance",dates:"",basis:"illustrative",matchedRequirements:["SQL"],bullets:[]});
+ assert.deepEqual(resumeRequirementGaps(draft.resume,demoAnalysis),["SQL"]);
+ draft.resume.experience[1].bullets=[{text:"Built SQL queries for quality reports.",evidence:""}];
+ assert.deepEqual(resumeRequirementGaps(cleanBundle(draft,demoProfile.experience,true,demoAnalysis).resume,demoAnalysis),[]);
+ assert.deepEqual(resumeRequirementGaps(cleanBundle(draft,demoProfile.experience,false,demoAnalysis).resume,demoAnalysis),["SQL"]);
+});
+test("resume gap review normalizes and deduplicates requirement labels",()=>{
+ const draft=structuredClone(demoBundle);
+ draft.resume.experience[0].matchedRequirements=["  EVALUATOR   CALIBRATION "];
+ const requirement=demoAnalysis.requirements[0];
+ const analysis={role:"QA",questions:[],requirements:[requirement,{...requirement,requirement:"SQL"},{...requirement,requirement:" sql "}]};
+ assert.deepEqual(resumeRequirementGaps(draft.resume,analysis),["SQL"]);
 });

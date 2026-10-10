@@ -61,11 +61,14 @@ Analysis, drafting and review retain 70/95/85-second stage limits, 40-second max
 The app displays configuration availability and compatible model counts alongside the provider/model controls. Progress identifies the provider/model currently being attempted. Completed stages are retained. `/api/models` requires workspace access and returns no credentials or key counts.
 Legacy `RESUME_PROVIDER` and all `*_MODEL` / `*_FALLBACK_MODELS` environment settings no longer restrict resume routing. Remove them from Vercel if desired; only keys are needed. A saved provider/model choice is treated as a first preference; the old providerFallback flag cannot disable automatic backups.
 
+## Complete resume targeting
+The final resume targets every distinct substantive job requirement, including preferred tools and domain skills. Analysis no longer stops at fourteen requirements. Drafting uses the job's exact terminology naturally and connects skills to concrete role/project bullets. Before the final review, unsupported bullets are removed and a requirement-gap check identifies missing examples. The reviewer uses those gaps to strengthen the resume's skills, headline, summary and relevant project experience. Remaining gaps are shown in the match-report warnings, outside exports. Mandatory eligibility facts such as degrees, licenses and years of experience are not invented. This targets complete content coverage; the evidence score still measures supplied background rather than assigning an automatic 100%.
+
 ## Generation and factual review
 Requirements are mapped to supplied evidence. The model drafts an application kit, then another model call reviews unsupported claims. Bullets whose source quotes cannot be found are removed.
 AI review can still make mistakes; users review claims before exports. Evidence coverage is a weighted drafting heuristic, not a universal ATS score or hiring probability. There is no guarantee of perfect fit or a top-hire outcome.
 The resume includes only roles mapped to requirements in the analyzed listing; unrelated jobs are omitted. Relevant achievements are prioritized rather than copying the full work history.
-**Add relevant freelance/project experience** enables a fictional draft mode. It can add up to two relevant project roles with ordinary titles under `Freelance` or `Confidential Project`. No added/fictional labels appear inside the document; the app banner and warnings prompt review of generated project details. Internal `basis` metadata distinguishes provided and illustrative roles, while `matchedRequirements` maps each role to the listing. Fictional entries cannot invent real employer names, dates, credentials or numerical results. Replace invented work with completed experience before applying.
+**Add relevant freelance/project experience** enables a fictional draft mode. New briefs enable this option by default. It can add relevant project roles, normally two to four, with ordinary titles under `Freelance` or `Confidential Project`. No added/fictional labels appear inside the document; the app banner and warnings prompt review of generated project details. Internal `basis` metadata distinguishes provided and illustrative roles, while `matchedRequirements` maps each role to the listing. Fictional entries cannot invent real employer names, dates, credentials or numerical results. Replace invented work with completed experience before applying.
 With this option off, source evidence is still required for every experience bullet. Actual-candidate evidence coverage, cover letters and interview guidance do not count fictional roles as real qualifications. Separate practice-project examples remain outside resume exports.
 
 ## Privacy and access
@@ -85,7 +88,7 @@ Live AI testing requires configured provider access and quota. A successful buil
 
 ## Verification performed
 - Next.js production build and TypeScript checks passed.
-- 41 unit tests passed, including ordered fallback, invalid output, rate limits, missing models, catalog outage, cancellation, attempt/stage deadlines, terminal account errors, evidence checks, and cookie access.
+- 43 unit tests passed, including ordered fallback, invalid output, rate limits, missing models, catalog outage, cancellation, attempt/stage deadlines, terminal account errors, evidence checks, and cookie access.
 - HTTP checks passed for page serving, password rejection/login, generation payload validation, cross-origin rejection, PDF worker, and coach access gates.
 - The authenticated coach session endpoint accepted a session with its compiled runtime running.
 - Browser automation was blocked by a missing system library in the test environment. Live model generation and visual/export behavior require verification on the configured deployment.
