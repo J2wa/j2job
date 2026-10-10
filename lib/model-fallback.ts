@@ -1,6 +1,6 @@
 export class ResumeGenerationError extends Error {
-  code: "access" | "credits" | "exhausted" | "timeout";
-  constructor(code: "access" | "credits" | "exhausted" | "timeout") { super(code); this.code = code; }
+  code: "access" | "credits" | "exhausted" | "timeout" | "configuration";
+  constructor(code: "access" | "credits" | "exhausted" | "timeout" | "configuration") { super(code); this.code = code; }
 }
 export function terminalFailure(error: unknown): "access" | "credits" | undefined {
   let current = error;
@@ -54,10 +54,11 @@ export async function runWithFallback<T>(options: {
   }
   throw new ResumeGenerationError("exhausted");
 }
-export function generationMessage(error: unknown) {
+export function generationMessage(error: unknown, provider = "AI Gateway") {
   if (error instanceof ResumeGenerationError) {
-    if (error.code === "access") return "AI Gateway access was rejected. Check the API key, Vercel OIDC setup, and model access rules.";
-    if (error.code === "credits") return "AI Gateway credits or budget are exhausted. Add credits or adjust the budget, then retry.";
+    if (error.code === "configuration") return "The AI provider or model configuration is invalid. Ask the workspace owner to check the environment settings.";
+    if (error.code === "access") return provider + " access was rejected. Check the configured API key and model access rules.";
+    if (error.code === "credits") return provider + " credits or budget are exhausted. Add credits or adjust the budget, then retry.";
     if (error.code === "exhausted") return "The compatible models could not return a valid resume. Please retry or configure a different model order.";
   }
   return "Generation reached its time limit or was interrupted. Please retry; shortening very long input may help.";

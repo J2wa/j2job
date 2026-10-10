@@ -1,6 +1,7 @@
 import { z } from "zod";
 const text = z.string().max(12000);
 export const profileSchema = z.object({
+ aiProvider:z.enum(["auto","gateway","openrouter"]).optional(),
  name: z.string().min(2).max(120), email: z.string().max(200), phone: z.string().max(80),
  location: z.string().max(160), links: z.string().max(500), experience: text,
  education: text, certifications: text, skills: text, resumeText: z.string().max(45000),
