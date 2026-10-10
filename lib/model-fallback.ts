@@ -23,7 +23,7 @@ export function terminalFailure(error: unknown): "access" | "credits" | undefine
     current = e.cause;
   }
 }
-export async function runWithFallback<T>(options: {
+export type FallbackOptions<T> = {
   models: string[]; signal: AbortSignal; budgetMs: number;
   run: (model: string, signal: AbortSignal) => Promise<unknown>;
   validate: (value: unknown) => T;
@@ -32,7 +32,8 @@ export async function runWithFallback<T>(options: {
   shouldSkip?: (model:string)=>boolean;
   onTerminalFailure?: (model:string,code:"access"|"credits")=>boolean;
   now?: () => number; attemptMs?: number;
-}) {
+};
+export async function runWithFallback<T>(options: FallbackOptions<T>) {
   const now = options.now ?? Date.now;
   const deadline = now() + options.budgetMs;
   let attempt = 0;
@@ -69,9 +70,28 @@ export async function runWithFallback<T>(options: {
   }
   throw new ResumeGenerationError("exhausted",[...failures].join("; "));
 }
+// Visit provider groups in order, reserving time so slow providers cannot starve backups.
+export async function runAcrossProviders<T>(options:Omit<FallbackOptions<T>,"models"> & {groups:string[][]}) {
+ const now=options.now??Date.now;
+ const deadline=now()+options.budgetMs;
+ let attempts=0;
+ let lastError:unknown=new ResumeGenerationError("exhausted");
+ const groups=options.groups.map(models=>models.filter(m=>!options.shouldSkip?.(m))).filter(models=>models.length);
+ for(let index=0;index<groups.length;index++){
+  options.signal.throwIfAborted();
+  const remaining=deadline-now();
+  if(remaining<=0)throw new ResumeGenerationError("timeout");
+  try {
+   const result=await runWithFallback({...options,models:groups[index],budgetMs:Math.max(1,Math.floor(remaining/(groups.length-index))),
+    onAttempt:model=>{attempts++;options.onAttempt?.(model,attempts);}});
+   return {...result,attempts};
+  }catch(error){options.signal.throwIfAborted();lastError=error;}
+ }
+ throw lastError;
+}
 export function generationMessage(error: unknown, provider = "AI Gateway") {
   if (error instanceof ResumeGenerationError) {
-    if (error.code === "configuration") return "The AI provider or model configuration is invalid. Ask the workspace owner to check the environment settings.";
+    if (error.code === "configuration") return "Configure valid OpenRouter, Gemini or OpenAI API keys in the server environment, then redeploy.";
     if (error.code === "access") return provider + " access was rejected. Check the configured API key and model access rules.";
     if (error.code === "credits") return provider + " credits or budget are exhausted. Add credits or adjust the budget, then retry.";
     if (error.code === "exhausted") return "The compatible models could not return a valid resume."+(error.detail?" Reported issues: "+error.detail+".":"")+" Check the provider key, model settings and quota, then retry.";

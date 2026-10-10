@@ -74,3 +74,19 @@ export function providerOrder(choice:string|undefined,allowFallback:boolean) {
  const primary=selectProvider(choice);
  return allowFallback?[primary,...providers.filter(p=>p!==primary&&providerEnabled(p))]:[primary];
 }
+
+export const resumeProviders:Provider[]=["openrouter","gemini","openai"];
+export function automaticProviders(env:Record<string,string|undefined>=process.env,choice?:string) {
+ const enabled=resumeProviders.filter(provider=>providerEnabled(provider,env));
+ if(!enabled.length)throw new ResumeGenerationError("configuration","Configure at least one OpenRouter, Gemini or OpenAI key.");
+ return choice&&enabled.includes(choice as Provider)?[choice as Provider,...enabled.filter(p=>p!==choice)]:enabled;
+}
+export function automaticModelOrder(provider:Provider,catalog:CatalogModel[]) {
+ if(provider==="openrouter")return orderOpenRouterModels(catalog);
+ if(provider==="gemini"){
+  const available=new Set(catalog.map(m=>m.id));
+  return [...new Set([...geminiModels().filter(id=>available.has(id)),...catalog.map(m=>m.id).sort().reverse()])];
+ }
+ if(provider==="openai")return catalog.toSorted((a,b)=>(b.released??0)-(a.released??0)||a.id.localeCompare(b.id)).map(m=>m.id);
+ return [];
+}
