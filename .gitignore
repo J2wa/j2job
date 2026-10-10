@@ -1,0 +1,8 @@
+node_modules
+.next
+.eve
+.vercel
+.env*
+!.env.example
+public/pdf.worker.min.mjs
+*.tsbuildinfo

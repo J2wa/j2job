@@ -1,0 +1,46 @@
+{
+  "name": "j2job",
+  "version": "0.0.0",
+  "type": "module",
+  "imports": {
+    "#*": "./agent/*",
+    "#evals/*": "./evals/*"
+  },
+  "scripts": {
+    "build": "next build",
+    "deploy": "eve deploy",
+    "dev": "next dev",
+    "eval": "eve eval",
+    "start": "next start",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build:eve": "eve build",
+    "dev:eve": "eve dev",
+    "start:eve": "eve start",
+    "postinstall": "node scripts/setup.mjs",
+    "test": "node --experimental-strip-types --test tests/resume.test.ts"
+  },
+  "dependencies": {
+    "@tailwindcss/postcss": "4.3.0",
+    "ai": "7.0.137",
+    "docx": "9.9.0",
+    "eve": "0.76.3",
+    "just-bash": "3.6.0",
+    "lucide-react": "1.16.0",
+    "mammoth": "1.13.0",
+    "next": "16.3.4",
+    "pdfjs-dist": "6.4.299",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "tailwindcss": "4.3.0",
+    "zod": "4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "24.x",
+    "@types/react": "19.2.15",
+    "@types/react-dom": "19.2.3",
+    "typescript": "6.0.3"
+  },
+  "engines": {
+    "node": "24.x"
+  }
+}

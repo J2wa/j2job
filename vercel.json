@@ -1,0 +1,1 @@
+{"framework":"nextjs","buildCommand":"npm run build","installCommand":"npm install","functions":{"app/api/generate/route.ts":{"maxDuration":300}}}
